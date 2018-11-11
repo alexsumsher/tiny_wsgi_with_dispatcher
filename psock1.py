@@ -73,11 +73,20 @@ class spsocket(socket.socket):
     S_WAIT = 0
     overtime = 120
 
-    def __new__(cls, fromsocket):
-        pass
+    @classmethod
+    def wrapsocket(cls, fromsocket):
+        if isinstance(fromsocket, socket.socket):
+            return cls(fromsocket)
+        else:
+            raise TypeError("not a socket instance pass in!")
 
-    def __init__(self, famliy=2, dtype=1, flag=0, rsmode=0, ltime=0):
-        super(spsocket, self).__init__(family, stype, flag)
+    def __init__(self, fromsocket=None, famliy=2, dtype=1, flag=0, rsmode=0, ltime=0):
+        if fromsocket:
+            self._socket = fromsocket
+            self._sock = self._socket._sock
+        else:
+            self._socket = None
+            super(spsocket, self).__init__(family, dtype, flag)
         self.status = self.S_WAIT
         self.stime = time.time()
         # keep_alive time , 0 means use and close
@@ -85,6 +94,19 @@ class spsocket(socket.socket):
         # receive and send mode: one time receive and one time send then close
         # if set to 1 then go, when receive rsmode +1, when send rsmode +2, rsmode=4 close
         self.rsmode = rsmode
+
+    def __getattr__(self, pn):
+        # when the socket comes from socket.socket(by cls.wrapsocket) redirect the attributies
+        return self.pn if hasattr(self, pn) else getattr(self._socket, pn)
+
+    def spaccept(self, set_blocking=0):
+        # return my socket
+        xsocket = self._socket or self
+        newcon, addr = xsocket.accept()
+        if newcon:
+            newcon.setblocking(set_blocking)
+            newcon = self.__class__.wrapsocket(newcon)
+        return newcon, addr
 
     def spsendall(self, data):
         self.stime = time.time()
@@ -187,7 +209,7 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
             s_sockets.append(psock[0])
             psock[1].close()
             time.sleep(0.3)
-            if _ >=2:
+            if _ >=num:
                 print workers.keys()
                 print s_sockets
                 main_proc.__dict__['when_int_signal'] = when_int_signal
