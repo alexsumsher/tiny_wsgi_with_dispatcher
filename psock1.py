@@ -77,6 +77,7 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
     s_sockets = []
     num = num or 3
     server = None
+    isleader = True
     inited = False
 
     def clearup(pid=0):
@@ -84,13 +85,14 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
         if pid > 0:
             os.kill(pid, signal.SIGUSR1)
             workers.pop(pid)
-            return
+            return pid
         # all clear: before exit
         if server:
             make_inet_socket(host, port, presock=server)
             os.environ.pop('current_host')
             os.environ.pop('current_port')
         for pid in workers.keys():
+            worker = workers.pop(pid)
             os.kill(pid, signal.SIGUSR1)
 
     def makecc(path):
@@ -113,6 +115,9 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
         if workers:
             clearup()
 
+    def proc_plus():
+        pass
+
     def patrol():
         # patrol for closed/overtime socket in input list
         # works with spsocket
@@ -121,7 +126,8 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
 
     for _ in xrange(num):
         psock = make_unix_psock()
-        worker = proc(psock[1])
+        worker = proc(psock[1], isleader=isleader)
+        isleader = False
         pid = os.fork()
         if pid != 0:
             workers[pid] = worker
@@ -232,13 +238,15 @@ class proc(object):
     # work as wsgi_holder + wsgi
     socknum = 0
 
-    def __init__(self, isock, islocal=True):
+    def __init__(self, isock, islocal=True, isleader=False):
         self.xid=0
         self.ear = isock
         self.app = None
         self.env = None
+        self.status = 0
         self.headerdone=False
         self.islocal = islocal
+        self.isleader = isleader
 
     def killme(self, sig, frame):
         print "killme signal"
@@ -290,15 +298,22 @@ class proc(object):
             return
         self.ear.sendall(data)
 
+    def do_leader(self):
+        # a leader's works:
+        pass
+
     def do_proc(self):
         print "worker: %s socknum: %s" % (self.xid, self.socknum)
         signal.signal(signal.SIGUSR1, self.killme)
         self.some_ini()
+        self.status = 1
         time.sleep(1)
         print "waiting from ..."
         inputs = [self.ear,]
         outputs = []
         while True:
+            if self.isleader:
+                self.do_leader()
             # by testing: listener still have to accept with another socktet
             try:
                 infds, outfds, errfds = select.select(inputs,outputs,inputs,0.5)
