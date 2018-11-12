@@ -7,6 +7,40 @@ import socket
 import time
 
 
+def is_port_clear(host, port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        rlt = sock.connect_ex((host, port))
+        sock.close()
+    except:
+        # if host not found some... false
+        print "connect error!"
+        return False
+    # if we can connect to port rlt==0 means port is used!
+    return False if rlt == 0 else True
+
+
+class bsocket(socket.socket):
+
+    @classmethod
+    def wrapsocket(cls, fromsocket):
+        if isinstance(fromsocket, socket.socket):
+            return cls(fromsocket)
+        else:
+            raise TypeError("not a socket instance pass in!")
+
+    def __init__(self, fromsocket=None, family=2, dtype=1, flag=0):
+        if fromsocket:
+            self._socket = fromsocket
+            self._sock = self._socket._sock
+        else:
+            self._socket = None
+            super(spsocket, self).__init__(family, dtype, flag)
+
+    def __getattr__(self, pn):
+        # when the socket comes from socket.socket(by cls.wrapsocket) redirect the attributies
+        return getattr(self, pn) if hasattr(self, pn) else getattr(self._socket, pn)
+
 #A local socket
 class spsocket(socket.socket):
     #AF_UNIX=1;AF_INET=2
@@ -79,6 +113,7 @@ class spsocket(socket.socket):
     def do_netserver(self, addr, port, backlog=5):
         if self.server:
             raise RuntimeError("SOCKET is alreay Server!")
+        assert is_port_clear(addr, port)
         self.bind((addr, port))
         self.setblocking(0)
         self.listen(backlog)

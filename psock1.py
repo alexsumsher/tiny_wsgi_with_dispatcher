@@ -63,7 +63,8 @@ def is_port_clear(host, port):
     # if we can connect to port rlt==0 means port is used!
     return False if rlt == 0 else True
 
-
+# single server mode
+# if distribute mode? works with inet
 def main_proc(num=0, host='0.0.0.0', port=8080):
     # if port is used then exit
     # work as server/arbiter/dispatcher
@@ -101,6 +102,11 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
         return s
 
     def wdispatcher(headstr):
+        # if we use leader, who's job is more than normal worker
+        # dispatcher like:
+        # py3: round(random.randint(1,100)%7/2+0.1)
+        # py2: round(float(random.randint(1,100))%7/2+0.1)
+        # check: cc=[0]*4;
         gwid = cookey(headstr, cookey_mark)
         if gwid and gwid.isdigit():
             gwid = int(gwid)
@@ -126,6 +132,7 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
 
     for _ in xrange(num):
         psock = make_unix_psock()
+        # number 0 works as leader of workers; for distribute mode
         worker = proc(psock[1], isleader=isleader)
         isleader = False
         pid = os.fork()
