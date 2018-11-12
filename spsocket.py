@@ -39,13 +39,14 @@ class spsocket(socket.socket):
         # receive and send mode: one time receive and one time send then close
         # if set to 1 then go, when receive rsmode +1, when send rsmode +2, rsmode=4 close
         self.rsmode = rsmode
+        self.server = False
 
     def __getattr__(self, pn):
         # when the socket comes from socket.socket(by cls.wrapsocket) redirect the attributies
         return getattr(self, pn) if hasattr(self, pn) else getattr(self._socket, pn)
 
     def __repr__(self):
-        if 'server' in self.__dict__:
+        if self.server:
             return 'Server:'
         return str(self._sock)
     
@@ -75,7 +76,9 @@ class spsocket(socket.socket):
         return newcon, addr
     """
 
-    def do_server(self, addr, port, backlog=5):
+    def do_netserver(self, addr, port, backlog=5):
+        if self.server:
+            raise RuntimeError("SOCKET is alreay Server!")
         self.bind((addr, port))
         self.setblocking(0)
         self.listen(backlog)

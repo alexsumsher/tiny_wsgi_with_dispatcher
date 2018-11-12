@@ -49,14 +49,21 @@ def make_respon2(text, cookies=None):
     return holder % (dtx, lenx), text
 
 
-class html_holder(object):
-    # lite easy html:head+content parse and response
-    
-    def __init__(self):
-        pass
+def env_parser(req_head, origin_dict=None, check_mobile=True):
+    #parse http request header to dict
+    # special checker:
+    # ismobile
+    spliter = r'[\s+|\r\n]'
+    headers = re.split(spliter, req_head)
+    origin_dict = origin_dict or dict()
+    origin_dict['REQUEST_METHOD'] = headers[0]
+    origin_dict['PATH_INFO'] = headers[1]
+    origin_dict['SCRIPT_NAME '] = ''
+    origin_dict['HTTP_HOST'] = headers[5]
+    if check_mobile:
+        origin_dict['IS_MOBILE'] = 'no'
+        ix = headers.index('User-Agent')
+        if ix > 0 and ('Android' in headers[ix+1] or 'AppleWebKit' in headers[ix+1]):
+            origin_dict['IS_MOBILE'] = 'yes'
+    return origin_dict
 
-    def make_response(self, content):
-        pass
-
-    def check_request(self):
-        pass

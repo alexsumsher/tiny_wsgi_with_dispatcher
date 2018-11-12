@@ -15,7 +15,7 @@ import signal
 import random
 from datetime import datetime as dt
 
-from iparts import cookey,make_respon2
+from iparts import cookey,make_respon2,env_parser
 from lite_back import app as flask_app
 from lite_wsgi import run_with_cgi
 
@@ -88,6 +88,8 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
         # all clear: before exit
         if server:
             make_inet_socket(host, port, presock=server)
+            os.environ.pop('current_host')
+            os.environ.pop('current_port')
         for pid in workers.keys():
             os.kill(pid, signal.SIGUSR1)
 
@@ -151,6 +153,9 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
     print "listening on %s:%s" % (host,port)
     if server is None:
         clearup()
+    # server info set to environment
+    os.environ['current_host'] = host
+    os.environ['current_port'] = port
     server.listen(1)
     inputs = [server]
     inputs.extend(s_sockets)
@@ -227,12 +232,13 @@ class proc(object):
     # work as wsgi_holder + wsgi
     socknum = 0
 
-    def __init__(self, isock):
+    def __init__(self, isock, islocal=True):
         self.xid=0
         self.ear = isock
         self.app = None
         self.env = None
         self.headerdone=False
+        self.islocal = islocal
 
     def killme(self, sig, frame):
         print "killme signal"
@@ -246,14 +252,19 @@ class proc(object):
     def some_ini(self):
         if callable(flask_app):
             self.app = flask_app
-        #environ = dict(os.environ.items())
-        environ=dict()
-        environ['SERVER_NAME'] = '127.0.0.1'
-        environ['SERVER_PORT'] = '8080'
+        if self.islocal is False:
+            environ = dict(os.environ.items())
+        else:
+            environ=dict()
+        environ['SERVER_NAME'] = os.environ['current_host']
+        environ['SERVER_PORT'] = os.environ['current_port']
+        """
         environ['REQUEST_METHOD'] = 'GET'
         environ['SCRIPT_NAME '] = ''
         environ['PATH_INFO'] = '/'
         environ['HTTP_HOST'] = '127.0.0.1'
+        environ['IS_MOBILE'] = 'no'
+        """
         environ['wsgi.input'] = self.ear
         environ['wsgi.errors'] = self.ear
         environ['wsgi.version'] = (1, 0)
@@ -261,6 +272,7 @@ class proc(object):
         environ['wsgi.multiprocess'] = True
         environ['wsgi.run_once'] = True
         environ['wsgi.url_scheme'] = 'http'
+        # spcial vars
         environ['wsgi.gworkerid'] = self.socknum
         self.env = environ
         self.wsgi = run_with_cgi
@@ -296,6 +308,8 @@ class proc(object):
                 data = self.ear.recv(1024)
                 print "data from %s by data with len: %s" % (self.xid, len(data))
                 self.headerdone = False
+                env_parser(data, self.env, check_mobile=False)
+                print self.env
                 respiter = self.wsgi(self.env, self.ear)
                 time.sleep(0.2)
                 # we can add cookies here
