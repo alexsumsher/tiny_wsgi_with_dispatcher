@@ -34,14 +34,37 @@ class spsocket(socket.socket):
         self.stime = time.time()
         # keep_alive time , 0 means use and close
         self.keep_alive = ltime
+        if ltime > 0:
+            self.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, True)
         # receive and send mode: one time receive and one time send then close
         # if set to 1 then go, when receive rsmode +1, when send rsmode +2, rsmode=4 close
         self.rsmode = rsmode
 
     def __getattr__(self, pn):
         # when the socket comes from socket.socket(by cls.wrapsocket) redirect the attributies
-        return self.pn if hasattr(self, pn) else getattr(self._socket, pn)
+        return getattr(self, pn) if hasattr(self, pn) else getattr(self._socket, pn)
 
+    def __repr__(self):
+        if 'server' in self.__dict__:
+            return 'Server:'
+        return str(self._sock)
+    
+    def accept(self, set_blocking=0):
+        if self._socket:
+            newcon, addr = self._socket.accept()
+        else:
+            newcon, addr = super(spsocket, self).accept()
+        newcon = self.__class__.wrapsocket(newcon)
+        return newcon, addr
+
+    def close(self):
+        self.status = self.S_CLOSED
+        if self._socket:
+            self._socket.close()
+        else:
+            super(spsocket, self).close()
+
+    """
     def spaccept(self, set_blocking=0):
         # return my socket
         xsocket = self._socket or self
@@ -50,7 +73,16 @@ class spsocket(socket.socket):
             newcon.setblocking(set_blocking)
             newcon = self.__class__.wrapsocket(newcon)
         return newcon, addr
+    """
 
+    def do_server(self, addr, port, backlog=5):
+        self.bind((addr, port))
+        self.setblocking(0)
+        self.listen(backlog)
+        self.server = True
+        return True
+
+    #sp-actions will do someting more
     def spsendall(self, data):
         self.stime = time.time()
         self.sendall(data)
@@ -60,9 +92,12 @@ class spsocket(socket.socket):
                 self.close()
                 self.status = self.S_CLOSED
 
-    def sprecv(self, length=1024):
+    def sprecv(self, length=1024, autoclose=False):
         self.stime = time.time()
         rv = self.recv(length)
+        if autoclose:
+            self.close()
+            self.status = self.S_CLOSED
         if self.rsmode > 0:
             self.rsmode += 1
             if self.rsmode == 4:
@@ -70,7 +105,7 @@ class spsocket(socket.socket):
                 self.status = self.S_CLOSED
         return rv
 
-    def sp_recv_all(self, length=1024):
+    def sp_recvall(self, length=1024):
         maxcount = 1024
         collector = b''
         for x in xrange(maxcount, 0, -1):
