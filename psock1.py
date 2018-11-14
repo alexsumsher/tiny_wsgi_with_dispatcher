@@ -14,10 +14,15 @@ import socket
 import signal
 import random
 from datetime import datetime as dt
+# from __future__ import division
 
 from iparts import cookey,make_respon2,env_parser
 from lite_back import app as flask_app
 from lite_wsgi import run_with_cgi
+from spsocket import spsocket
+
+# update:
+# work with spsocket
 
 cookey_mark = 'gworkerid'
 
@@ -34,8 +39,10 @@ def make_unix_socket(path, psock=None):
 
 def make_unix_psock():
     # pair socket is good to use
-    psock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM, 0)
-    return psock
+    psock_a,psock_b = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM, 0)
+    psock_a = spsocket.wrapsocket(psock_a)
+    psock_b = spsocket.wrapsocket(psock_b)
+    return psock_a,psock_b
 
 def make_inet_socket(ipaddr, port, presock=None):
     if presock:
@@ -104,9 +111,9 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
     def wdispatcher(headstr):
         # if we use leader, who's job is more than normal worker
         # dispatcher like:
-        # py3: round(random.randint(1,100)%7/2+0.1)
+        # py3: from __future__ import division; round(random.randint(1,100)%7/2+0.1)
         # py2: round(float(random.randint(1,100))%7/2+0.1)
-        # check: cc=[0]*4;
+        # py2: seler = [0]; [seler.extend([_]*2) for _ in xrange(num-1)];random.choice(seler)
         gwid = cookey(headstr, cookey_mark)
         if gwid and gwid.isdigit():
             gwid = int(gwid)
@@ -121,7 +128,7 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
         if workers:
             clearup()
 
-    def proc_plus():
+    def proc_plus(number=0):
         pass
 
     def patrol():
@@ -162,14 +169,14 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
             raise
     #main proc
     counter = 0
-    server = make_inet_socket(host, port)
-    print "listening on %s:%s" % (host,port)
-    if server is None:
+    server = spsocket()
+    if server.do_netserver(host, port, 1):
+        print "listening on %s:%s" % (host,port)
+    else:
         clearup()
     # server info set to environment
     os.environ['current_host'] = host
     os.environ['current_port'] = port
-    server.listen(1)
     inputs = [server]
     inputs.extend(s_sockets)
     outputs = []
@@ -273,20 +280,9 @@ class proc(object):
             environ=dict()
         environ['SERVER_NAME'] = os.environ['current_host']
         environ['SERVER_PORT'] = os.environ['current_port']
-        """
-        environ['REQUEST_METHOD'] = 'GET'
-        environ['SCRIPT_NAME '] = ''
-        environ['PATH_INFO'] = '/'
-        environ['HTTP_HOST'] = '127.0.0.1'
-        environ['IS_MOBILE'] = 'no'
-        """
+        # here for a lite mode, not set the input/errors
         environ['wsgi.input'] = self.ear
         environ['wsgi.errors'] = self.ear
-        environ['wsgi.version'] = (1, 0)
-        environ['wsgi.multithread']  = False
-        environ['wsgi.multiprocess'] = True
-        environ['wsgi.run_once'] = True
-        environ['wsgi.url_scheme'] = 'http'
         # spcial vars
         environ['wsgi.gworkerid'] = self.socknum
         self.env = environ
@@ -330,13 +326,13 @@ class proc(object):
                 data = self.ear.recv(1024)
                 print "data from %s by data with len: %s" % (self.xid, len(data))
                 self.headerdone = False
-                env_parser(data, self.env, check_mobile=False)
-                print self.env
-                respiter = self.wsgi(self.env, self.ear)
+                # cenv use for current http action
+                cenv = env_parseall(data, self.env, check_mobile=False)
+                print cenv
+                respiter = self.wsgi(cenv, self.ear)
                 time.sleep(0.2)
                 # we can add cookies here
                 result = self.app(self.env, respiter.start_response)
-                #['200 OK', [('Content-Type', 'text/html; charset=utf-8'), ('Content-Length', '77'), ('Set-Cookie', 'gworkerid=1; Path=/')]]
                 try:
                     for data in result:
                         if data:    # don't send headers until body appears

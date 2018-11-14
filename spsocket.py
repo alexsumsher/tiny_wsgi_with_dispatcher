@@ -29,13 +29,13 @@ class bsocket(socket.socket):
         else:
             raise TypeError("not a socket instance pass in!")
 
-    def __init__(self, fromsocket=None, family=2, dtype=1, flag=0):
+    def __init__(self, family=2, dtype=1, flag=0, fromsocket=None):
         if fromsocket:
             self._socket = fromsocket
             self._sock = self._socket._sock
         else:
             self._socket = None
-            super(spsocket, self).__init__(family, dtype, flag)
+            super(bsocket, self).__init__(family, dtype, flag)
 
     def __getattr__(self, pn):
         # when the socket comes from socket.socket(by cls.wrapsocket) redirect the attributies
@@ -57,7 +57,7 @@ class spsocket(socket.socket):
         else:
             raise TypeError("not a socket instance pass in!")
 
-    def __init__(self, fromsocket=None, family=2, dtype=1, flag=0, rsmode=0, ltime=0):
+    def __init__(self, family=2, dtype=1, flag=0, rsmode=0, ltime=0, fromsocket=None):
         if fromsocket:
             self._socket = fromsocket
             self._sock = self._socket._sock
@@ -73,14 +73,14 @@ class spsocket(socket.socket):
         # receive and send mode: one time receive and one time send then close
         # if set to 1 then go, when receive rsmode +1, when send rsmode +2, rsmode=4 close
         self.rsmode = rsmode
-        self.server = False
+        self.isserver = False
 
     def __getattr__(self, pn):
         # when the socket comes from socket.socket(by cls.wrapsocket) redirect the attributies
         return getattr(self, pn) if hasattr(self, pn) else getattr(self._socket, pn)
 
     def __repr__(self):
-        if self.server:
+        if self.isserver:
             return 'Server:'
         return str(self._sock)
     
@@ -111,13 +111,13 @@ class spsocket(socket.socket):
     """
 
     def do_netserver(self, addr, port, backlog=5):
-        if self.server:
+        if self.isserver:
             raise RuntimeError("SOCKET is alreay Server!")
         assert is_port_clear(addr, port)
         self.bind((addr, port))
         self.setblocking(0)
         self.listen(backlog)
-        self.server = True
+        self.isserver = True
         return True
 
     #sp-actions will do someting more
