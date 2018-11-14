@@ -154,9 +154,9 @@ class spsocket(socket.socket):
         self.stime = time.time()
         return collector
 
-    def destroy(self, chktime=0):
+    def destroy(self, chktime=0, force=False):
         chktime = chktime or time.time()
-        if chktime - self.stime > self.overtime or chktime - self.stime > self.keep_alive:
+        if force or chktime - self.stime > self.overtime or chktime - self.stime > self.keep_alive:
             self.close()
             return True
         else:

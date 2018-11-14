@@ -72,7 +72,7 @@ def is_port_clear(host, port):
 
 # single server mode
 # if distribute mode? works with inet
-def main_proc(num=0, host='0.0.0.0', port=8080):
+def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
     # if port is used then exit
     # work as server/arbiter/dispatcher
     try:
@@ -83,10 +83,15 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
 
     workers = {}
     s_sockets = []
-    num = num or 3
+    # i don't wanna use class, so....
+    main_proc.proc_num_limit = proc_num_limit or 3
+    # the last assigned proc_number, if new proc created, proc_number +=1 as 
+    # worker's id which is the key of worker in workers dict.
+    main_proc.last_proc_num = 0
+    main_proc.isleader = True
+    main_proc.inited = False
+
     server = None
-    isleader = True
-    inited = False
 
     def clearup(pid=0):
         #single clear
@@ -96,7 +101,7 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
             return pid
         # all clear: before exit
         if server:
-            make_inet_socket(host, port, presock=server)
+            server.destroy(force=True)
             os.environ.pop('current_host')
             os.environ.pop('current_port')
         for pid in workers.keys():
@@ -128,46 +133,67 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
         if workers:
             clearup()
 
-    def proc_plus(number=0):
-        pass
+    def proc_maintain():
+        # proc_num is outer variable, in local function, which could be read but not write
+        nums = len(workers)
+        if nums >= main_proc.proc_num_limit:
+            return -1
+        times = main_proc.proc_num_limit - nums
+        for _ in xrange(times):
+            psock = make_unix_psock()
+            worker = proc(psock[1], main_proc.isleader)
+            main_proc.isleader = False
+            main_proc.inited = False
+            main_proc.last_proc_num += 1
+            pid = os.fork()
+            if pid != 0:
+                workers[pid] = worker
+                s_sockets.append(psock[0])
+                psock[0].workerpid = pid
+                psock[1].close()
+                time.sleep(0.3)
+            else:
+                return worker
+        print workers.keys()
+        print s_sockets
+        main_proc.when_int_signal = when_int_signal
+        signal.signal(signal.SIGINT, when_int_signal)
+        main_proc.inited = True
+        return main_proc.last_proc_num
 
     def patrol():
         # patrol for closed/overtime socket in input list
         # works with spsocket
         # patrol for dead sub-process and spawn new ones
-        pass
+        print '------patroling--------'
+        debugstr = ''
+        chktime = time.time()
+        for n,s in s_sockets.items():
+            if s.destroy(chktime) is False:
+                debugstr += 'stick_sockt %s is alive!' % n
+            else:
+                debugstr += 'stick_sockt %s is die and replace with new one!' % n
+                wpid = s.workerpid
+                s_sockets.pop(n)
+                clearup(wpid)
+        print debugstr
+        return proc_maintain()
 
-    for _ in xrange(num):
-        psock = make_unix_psock()
-        # number 0 works as leader of workers; for distribute mode
-        worker = proc(psock[1], isleader=isleader)
-        isleader = False
-        pid = os.fork()
-        if pid != 0:
-            workers[pid] = worker
-            s_sockets.append(psock[0])
-            psock[1].close()
-            time.sleep(0.3)
-            if _ >=num:
-                print workers.keys()
-                print s_sockets
-                main_proc.__dict__['when_int_signal'] = when_int_signal
-                signal.signal(signal.SIGINT, when_int_signal)
-                inited = True
-            continue
-        break
-        # sub
-        #print len(workers)
+    # at the very beginning, proc_num is 0 and set to proc_num_limit - 1 after first time proc_maintain
+    proc_maintain()
+
+    # sub process!
+    # print len(workers)
     if inited is False:
         try:
-            worker.socknum = _
+            worker.socknum = main_proc.last_proc_num
             worker.xid = os.getpid()
             worker.do_proc()
             sys.exit(0)
         except Exception as e:
             print e
             raise
-    #main proc
+    # main process!
     counter = 0
     server = spsocket()
     if server.do_netserver(host, port, 1):
@@ -180,7 +206,7 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
     inputs = [server]
     inputs.extend(s_sockets)
     outputs = []
-    outq={}
+    outq = {}
     # main loop
     while True:
         counter += 1
@@ -245,7 +271,19 @@ def main_proc(num=0, host='0.0.0.0', port=8080):
                     inputs.remove(_)
                 except:
                     pass
-    print 'all done'
+        patroler = patrol()
+        if isinstance(patroler, proc):
+            break
+    # when patrol action break the loop; a new name "patroler" shuld be create as a worker(proc class)
+    try:
+        clearup()
+        patroler.socknum = main_proc.last_proc_num
+        patroler.xid = os.getpid()
+        patroler.do_proc()
+        sys.exit(0)
+    except Exception as e:
+        print e
+        raise
 
 
 class proc(object):
