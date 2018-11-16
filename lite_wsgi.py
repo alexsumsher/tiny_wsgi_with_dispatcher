@@ -6,12 +6,12 @@ import os, sys
 class run_with_cgi(object):
 
     def_env = {
-        'wsgi.version' : (1, 0)
-        'wsgi.multithread' : False
-        'wsgi.multiprocess' : True
-        'wsgi.run_once' : True
-        'wsgi.url_scheme' : 'http'
-    }
+        'wsgi.version': (1, 0),
+        'wsgi.multithread': False,
+        'wsgi.multiprocess': True,
+        'wsgi.run_once': True,
+        'wsgi.url_scheme': 'http',
+        }
 
     def __init__(self, environ, sender):
         self.environ = environ

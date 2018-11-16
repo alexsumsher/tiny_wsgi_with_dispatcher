@@ -20,27 +20,6 @@ def is_port_clear(host, port):
     return False if rlt == 0 else True
 
 
-class bsocket(socket.socket):
-
-    @classmethod
-    def wrapsocket(cls, fromsocket):
-        if isinstance(fromsocket, socket.socket):
-            return cls(fromsocket)
-        else:
-            raise TypeError("not a socket instance pass in!")
-
-    def __init__(self, family=2, dtype=1, flag=0, fromsocket=None):
-        if fromsocket:
-            self._socket = fromsocket
-            self._sock = self._socket._sock
-        else:
-            self._socket = None
-            super(bsocket, self).__init__(family, dtype, flag)
-
-    def __getattr__(self, pn):
-        # when the socket comes from socket.socket(by cls.wrapsocket) redirect the attributies
-        return getattr(self, pn) if hasattr(self, pn) else getattr(self._socket, pn)
-
 #A local socket
 class spsocket(socket.socket):
     #AF_UNIX=1;AF_INET=2
@@ -50,26 +29,15 @@ class spsocket(socket.socket):
     S_WAIT = 0
     overtime = 120
 
-    @classmethod
-    def wrapsocket(cls, fromsocket):
-        if isinstance(fromsocket, socket.socket):
-            return cls(fromsocket)
-        else:
-            raise TypeError("not a socket instance pass in!")
-
-    def __init__(self, family=2, dtype=1, flag=0, rsmode=0, ltime=0, fromsocket=None):
-        if fromsocket:
-            self._socket = fromsocket
-            self._sock = self._socket._sock
-        else:
-            self._socket = None
-            super(spsocket, self).__init__(family, dtype, flag)
+    def __init__(self, family=2, dtype=1, proto=0, rsmode=0, ltime=0):
+        # _socket = True => socket made by socketpair
+        super(spsocket, self).__init__(family, dtype, proto)
         self.status = self.S_WAIT
         self.stime = time.time()
         # keep_alive time , 0 means use and close
         self.keep_alive = ltime
         if ltime > 0:
-            self.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, True)
+            self.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         # receive and send mode: one time receive and one time send then close
         # if set to 1 then go, when receive rsmode +1, when send rsmode +2, rsmode=4 close
         self.rsmode = rsmode
@@ -77,27 +45,12 @@ class spsocket(socket.socket):
 
     def __getattr__(self, pn):
         # when the socket comes from socket.socket(by cls.wrapsocket) redirect the attributies
-        return getattr(self, pn) if hasattr(self, pn) else getattr(self._socket, pn)
+        return getattr(self, pn) if hasattr(self, pn) else getattr(super(spsocket, self), pn)
 
     def __repr__(self):
         if self.isserver:
             return 'Server:'
         return str(self._sock)
-    
-    def accept(self, set_blocking=0):
-        if self._socket:
-            newcon, addr = self._socket.accept()
-        else:
-            newcon, addr = super(spsocket, self).accept()
-        newcon = self.__class__.wrapsocket(newcon)
-        return newcon, addr
-
-    def close(self):
-        self.status = self.S_CLOSED
-        if self._socket:
-            self._socket.close()
-        else:
-            super(spsocket, self).close()
 
     """
     def spaccept(self, set_blocking=0):
@@ -112,7 +65,8 @@ class spsocket(socket.socket):
 
     def do_netserver(self, addr, port, backlog=5):
         if self.isserver:
-            raise RuntimeError("SOCKET is alreay Server!")
+            print "SOCKET is alreay Server!"
+            return False
         assert is_port_clear(addr, port)
         self.bind((addr, port))
         self.setblocking(0)
@@ -161,3 +115,9 @@ class spsocket(socket.socket):
             return True
         else:
             return False
+
+
+def boxsocket(object):
+    # object contain a socket
+    def __init__(self, family=2, stype=1, proto=0, _sock=None):
+        self._sock = _sock

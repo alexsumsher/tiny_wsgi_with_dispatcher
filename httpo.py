@@ -4,16 +4,25 @@
 # http req handler;
 # 
 
-class http_req(object):
 
-    def __new__(cls, req_dict):
-        # return get/post/some
-        pass
+def make_httpo(req_dict):
+    m = req_dict['REQUEST_METHOD']
+    if m == 'GET':
+        return http_req_get('abc')
+    elif m == 'POST':
+        return http_req_get('cdf')
+
+
+class http_req(object):
+    pass
 
     # __init__ is not need
 
 
 class http_req_get(http_req):
+
+    def __new__(cls, accept2socket):
+        pass
     
     def __init__(self, accept2socket):
         self.method = 'GET'

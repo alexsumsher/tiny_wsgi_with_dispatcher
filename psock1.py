@@ -16,7 +16,7 @@ import random
 from datetime import datetime as dt
 # from __future__ import division
 
-from iparts import cookey,make_respon2,env_parser
+from iparts import cookey, make_respon2, env_parseall, inmsger
 from lite_back import app as flask_app
 from lite_wsgi import run_with_cgi
 from spsocket import spsocket
@@ -40,8 +40,8 @@ def make_unix_socket(path, psock=None):
 def make_unix_psock():
     # pair socket is good to use
     psock_a,psock_b = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM, 0)
-    psock_a = spsocket.wrapsocket(psock_a)
-    psock_b = spsocket.wrapsocket(psock_b)
+    psock_a.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    psock_b.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     return psock_a,psock_b
 
 def make_inet_socket(ipaddr, port, presock=None):
@@ -70,6 +70,7 @@ def is_port_clear(host, port):
     # if we can connect to port rlt==0 means port is used!
     return False if rlt == 0 else True
 
+
 # single server mode
 # if distribute mode? works with inet
 def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
@@ -80,9 +81,7 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
     except AssertionError:
         print "PORT is USED!"
         raise
-
-    workers = {}
-    s_sockets = []
+    
     # i don't wanna use class, so....
     main_proc.proc_num_limit = proc_num_limit or 3
     # the last assigned proc_number, if new proc created, proc_number +=1 as 
@@ -91,22 +90,29 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
     main_proc.isleader = True
     main_proc.inited = False
 
+    # workers: {af_unix_socket_fileno: workerpid}
+    workers = {}
+    s_sockets = [None] * main_proc.proc_num_limit
     server = None
+    # server info set to environment
+    os.environ['current_host'] = host
+    os.environ['current_port'] = str(port)
 
-    def clearup(pid=0):
+    def clearup(fno=0):
         #single clear
-        if pid > 0:
-            os.kill(pid, signal.SIGUSR1)
-            workers.pop(pid)
-            return pid
+        if fno > 0:
+            wpid = workers[fno]
+            os.kill(wpid, signal.SIGUSR1)
+            workers.pop(fno)
+            return fno
         # all clear: before exit
         if server:
             server.destroy(force=True)
             os.environ.pop('current_host')
             os.environ.pop('current_port')
-        for pid in workers.keys():
-            worker = workers.pop(pid)
-            os.kill(pid, signal.SIGUSR1)
+        for fo in workers.keys():
+            wpid = workers.pop(fo)
+            os.kill(wpid, signal.SIGUSR1)
 
     def makecc(path):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM, 0)
@@ -126,35 +132,34 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
                 print "get gwid from cookies: %s" % gwid
                 return gwid
         print "no gwid from cookie!"
-        return random.randint(1,100) % num
+        return random.randint(1,100) % main_proc.proc_num_limit
 
     def when_int_signal(sig, frame):
         print "INT SIGNAL CATCHED!"
         if workers:
             clearup()
+            os._exit()
 
     def proc_maintain():
         # proc_num is outer variable, in local function, which could be read but not write
-        nums = len(workers)
-        if nums >= main_proc.proc_num_limit:
-            return -1
-        times = main_proc.proc_num_limit - nums
-        for _ in xrange(times):
+        # 填坑模式
+        for n in xrange(len(s_sockets)):
+            if s_sockets[n] is not None:
+                continue
             psock = make_unix_psock()
-            worker = proc(psock[1], main_proc.isleader)
+            worker = proc(psock[1], isleader=main_proc.isleader)
             main_proc.isleader = False
             main_proc.inited = False
-            main_proc.last_proc_num += 1
-            pid = os.fork()
-            if pid != 0:
-                workers[pid] = worker
-                s_sockets.append(psock[0])
-                psock[0].workerpid = pid
+            main_proc.last_proc_num = n
+            wpid = os.fork()
+            if wpid != 0:
+                workers[psock[0].fileno()] = wpid
+                s_sockets[n] = psock[0]
                 psock[1].close()
                 time.sleep(0.3)
             else:
                 return worker
-        print workers.keys()
+        print workers
         print s_sockets
         main_proc.when_int_signal = when_int_signal
         signal.signal(signal.SIGINT, when_int_signal)
@@ -168,23 +173,27 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
         print '------patroling--------'
         debugstr = ''
         chktime = time.time()
-        for n,s in s_sockets.items():
-            if s.destroy(chktime) is False:
-                debugstr += 'stick_sockt %s is alive!' % n
-            else:
-                debugstr += 'stick_sockt %s is die and replace with new one!' % n
-                wpid = s.workerpid
-                s_sockets.pop(n)
-                clearup(wpid)
+        c = 0
+        for n in xrange(len(s_sockets)):
+            try:
+                s_sockets[n].getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+            except socket.error:
+                # die
+                s = s_sockets[n]
+                fno = s.fileno()
+                debugstr += 'stick_sockt file_no: %s is die and replace with new one!' % fno
+                clearup(fno)
+                s_sockets[n] = None
+                c += 1
         print debugstr
-        return proc_maintain()
+        return proc_maintain() if c else None
 
     # at the very beginning, proc_num is 0 and set to proc_num_limit - 1 after first time proc_maintain
-    proc_maintain()
-
+    # main_proc return with number of workers, and sub proc return cur worker
+    worker = proc_maintain()
     # sub process!
     # print len(workers)
-    if inited is False:
+    if main_proc.inited is False:
         try:
             worker.socknum = main_proc.last_proc_num
             worker.xid = os.getpid()
@@ -200,33 +209,29 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
         print "listening on %s:%s" % (host,port)
     else:
         clearup()
-    # server info set to environment
-    os.environ['current_host'] = host
-    os.environ['current_port'] = port
+        return
     inputs = [server]
     inputs.extend(s_sockets)
     outputs = []
     outq = {}
     # main loop
     while True:
-        counter += 1
-        if counter > 120:
-            clearup()
-            return
         try:
             readable, writable, exceptional = select.select(inputs, outputs, inputs, 0.5)
         except:
             print 'Exception on Select'
             clearup()
             return
+        # handle: server_socket; worker_socket; client_socket
         for _ in readable:
             if _ is server:
                 # server always listen so accept with another socket
-                conn, client_addr = _.accept()
+                conn, client_addr = server.accept()
                 print("new connection from", client_addr)
                 # for fast hanlding put conn to input and handle it next loop
                 conn.setblocking(0)
                 inputs.append(conn)
+                print inputs
             else:
                 data = _.recv(1024)
                 if data:
@@ -257,6 +262,7 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
                         else:
                             print "not found the correct connection to inet with name: %s" % sname
                 else:
+                    #print "no data recv!"
                     if _.family == socket.AF_UNIX:
                         _.setblocking(0)
                     else:
@@ -271,12 +277,17 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
                     inputs.remove(_)
                 except:
                     pass
-        patroler = patrol()
-        if isinstance(patroler, proc):
-            break
+        # count for patrol
+        counter += 1
+        if counter > 30:
+            # patrol for dead socket in s_socket(connect to a worker identifed by socket.workerpid)
+            patroler = patrol()
+            if isinstance(patroler, proc):
+                break
+            counter = 0
     # when patrol action break the loop; a new name "patroler" shuld be create as a worker(proc class)
+    print "break from the main loop cause forked as sub-process"
     try:
-        clearup()
         patroler.socknum = main_proc.last_proc_num
         patroler.xid = os.getpid()
         patroler.do_proc()
@@ -312,12 +323,13 @@ class proc(object):
     def some_ini(self):
         if callable(flask_app):
             self.app = flask_app
-        if self.islocal is False:
-            environ = dict(os.environ.items())
-        else:
+        if self.islocal:
             environ=dict()
-        environ['SERVER_NAME'] = os.environ['current_host']
-        environ['SERVER_PORT'] = os.environ['current_port']
+        else:
+            print "local is False and get os environ!"
+            environ = dict(os.environ.items())
+        environ['SERVER_NAME'] = os.environ.get('current_host', '127.0.0.1')
+        environ['SERVER_PORT'] = os.environ.get('current_port', '8080')
         # here for a lite mode, not set the input/errors
         environ['wsgi.input'] = self.ear
         environ['wsgi.errors'] = self.ear
@@ -341,6 +353,7 @@ class proc(object):
 
     def do_leader(self):
         # a leader's works:
+        print "this is leader"
         pass
 
     def do_proc(self):
@@ -352,6 +365,7 @@ class proc(object):
         print "waiting from ..."
         inputs = [self.ear,]
         outputs = []
+        dcount = 120
         while True:
             if self.isleader:
                 self.do_leader()
@@ -365,12 +379,10 @@ class proc(object):
                 print "data from %s by data with len: %s" % (self.xid, len(data))
                 self.headerdone = False
                 # cenv use for current http action
-                cenv = env_parseall(data, self.env, check_mobile=False)
-                print cenv
+                cenv = env_parseall(data, origin_dict=self.env)
                 respiter = self.wsgi(cenv, self.ear)
-                time.sleep(0.2)
                 # we can add cookies here
-                result = self.app(self.env, respiter.start_response)
+                result = self.app(cenv, respiter.start_response)
                 try:
                     for data in result:
                         if data:    # don't send headers until body appears

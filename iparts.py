@@ -55,8 +55,11 @@ def env_parseall(req_head, origin_dict=None, check_mobile=True):
     def fline_parser(fline):
         # firstline: GET /abc.file HTTP/1.1
         blocks = re.split(r'\s+', fline)
-        qstr = blocks[1].split('?')[1]
-        odict = dict(REQUEST_METHOD=blocks[0], PATH_INFO=blocks[1], QUERY_STRING=qstr, SERVER_PROTOCOL=blocks[2])
+        try:
+            qstr = blocks[1].split('?')[1]
+        except IndexError:
+            qstr = ''
+        return dict(REQUEST_METHOD=blocks[0], PATH_INFO=blocks[1], QUERY_STRING=qstr, SERVER_PROTOCOL=blocks[2])
 
     hdrs = re.split(r'[:|\r\n]', req_head)
     out_dict = dict()
@@ -65,20 +68,26 @@ def env_parseall(req_head, origin_dict=None, check_mobile=True):
     fline = fline_parser(hdrs.pop(0))
     # fline: 'GET|POST|... target http_version'
     x = 0
-    mlen = len(hdrs)
-    while x<=mlen:
-        if len(hdrs[x]) != 0:
+    mlen = len(hdrs) - 1
+    while x <= mlen:
+        if len(hdrs[x]) > 0:
             out_dict['HTTP_' + hdrs[x].upper()] = hdrs[x+1]
             x += 2
         else:
             x += 1
     if check_mobile:
         out_dict['IS_MOBILE'] = 'no'
-        UA = out_dict['HTTP_USER_AGENT']
+        UA = out_dict.get('HTTP_USER-AGENT')
         if UA and ('Android' in UA or 'Phone' in UA or 'Mobile' in UA):
             out_dict['IS_MOBILE'] = 'yes'
     out_dict.update(fline)
     return out_dict
 
-def env_parseone(req_head, target):
-    pass
+def inmsger(msg):
+    msgtypes = {'SENDER'}
+    if len(msg) < 32:
+        hdr = msg.split(">>>")
+        if len(hdr) == 2 and hdr[0] in msgtypes:
+            return hdr[1]
+    else:
+        return None
