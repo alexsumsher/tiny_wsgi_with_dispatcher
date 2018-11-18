@@ -9,7 +9,6 @@ def cookie_respon(rspdata, cookies=None):
         return rsp
     for k,v in cookies.items():
         rsp.set_cookie(k, value=str(v))
-    print rsp
     return rsp
 
 app = Flask(__name__)
