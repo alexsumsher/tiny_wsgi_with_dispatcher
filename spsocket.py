@@ -117,7 +117,35 @@ class spsocket(socket.socket):
             return False
 
 
-def boxsocket(object):
-    # object contain a socket
-    def __init__(self, family=2, stype=1, proto=0, _sock=None):
-        self._sock = _sock
+class sock_assist(object):
+
+    #https://docs.python.org/2.7/library/select.html#module-select:
+    #Among the acceptable object types in the sequences are Python file objects (e.g. sys.stdin, or objects returned by open() or os.popen()), socket objects returned by socket.socket(). You may also define a wrapper class yourself, as long as it has an appropriate fileno() method (that really returns a file descriptor, not just a random integer).
+    def __init__(self, fromsocket=None, family=2, dtype=1, proto=0):
+        if fromsocket is None:
+            self.socket = socket.socket(family, dtype, proto)
+        elif isinstance(fromsocket, socket.socket):
+            self.socket = fromsocket
+            self._sock = self.socket._sock
+        # elif (type of pairsocket) ....
+        else:
+            raise NotImplementedError
+        self.keep_alive = False
+        self.stime = time.time()
+
+    def socket_attr(self, attname):
+        return getattr(self.socket, attname)
+
+    def fileno(self):
+        return self['fileno']()
+
+    def __getitem__(self, iname):
+        # spcial:
+        # self.recv() and self['recv']()
+        return getattr(self.socket, iname)
+
+    def destroy(self):
+        if self.keep_alive:
+            return False
+        self.socket.close()
+        return True

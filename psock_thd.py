@@ -198,14 +198,6 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
         print debugstr
         return proc_maintain() if c else None
 
-    def markchk(stream):
-        mk = stream[:10]
-        if mk == '<::0000::>':
-            return 1,stream[10:14]
-        elif mk == '<::1111::>':
-            return 2,stream[10:14]
-        return 0,''
-
     # at the very beginning, proc_num is 0 and set to proc_num_limit - 1 after first time proc_maintain
     # main_proc return with number of workers, and sub mproc return cur worker
     worker = proc_maintain()
@@ -236,79 +228,81 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
     # next_cons = {work1: con1, work2: con2, ...} one con per work, when r_socket get "<::1111::>????"
     # rdata[:10] == '<::0000::>'?threadid=rdata[10:]
     outq = {}
-    waiting_cons = {}
     next_cons = {}
     smark = '<::0000::>??'
     # main loop
     while True:
         try:
-            readable, writable, exceptional = select.select(inputs, outputs, inputs, 0.5)
+            readable, writable, exceptional = select.select(inputs, outputs, inputs, 0.1)
         except Exception as e:
             print 'Exception on Select %s' % e
             clearup()
             return
         # handle: server_socket; worker_socket; client_socket
+        print 'lenth of coming sock: %s' % len(readable)
+        # 如果select是线性扫描，则如有client connnect必然在首位
+        # https://blog.csdn.net/q8250356/article/details/81058396
+        if readable and readable[0] is server:
+            svr = readable.pop(0)
+            # server always listen so accept with another socket
+            conn, client_addr = server.accept()
+            print("new connection from", client_addr)
+            # for fast hanlding put conn to input and handle it next loop
+            conn.setblocking(0)
+            # 直接处理？通常client发起connect的同时会立刻发送数据
+            # 可能策略2：select只循环[server,]并将accept生成的conn列表，一直到到没有接入要求时再开始处理conn列表的recv操作？
+            readable.append(conn)
+            #inputs.append(conn)
         for _ in readable:
-            if _ is server:
-                # server always listen so accept with another socket
-                conn, client_addr = server.accept()
-                print("new connection from", client_addr)
-                # for fast hanlding put conn to input and handle it next loop
-                conn.setblocking(0)
-                inputs.append(conn)
-            else:
-                data = _.recv(1024)
-                if not data:
-                    continue
-                fromer = _.getpeername()[0] if _.family == socket.AF_INET else 'sock'
-                print('received data with len %s from %s' % (len(data), fromer))
-                # when data from mproc send data to client with output
-                # devide for tcp and unix socket
-                if _.family == socket.AF_INET:
-                    v = wdispatcher(data)
-                    #os.write(s_sockets[v], '1bcdef')
-                    fno = _.fileno()
-                    s = s_sockets[v]
-                    s.sendall('<::0000::>{:0>4d}'.format(fno))
-                    s.send(data)
-                    # make the inet connectin for return data
-                    outq[fno] = _
-                    # the unix con s should wait for respon from mproc, so put into inputs
-                    # pattern: cause we are under the syn mode, only one conn on a r_socket, so use index of unix socket for name of conn
-                elif _.family == socket.AF_UNIX:
-                    # data from unix means comes from worker from r_sockets
-                    # chcek the target con:
-                    rname = r_sockets.index(_)
-                    s_inet = None
-                    if len(data) >= 14 and data[:10] == '<::1111::>':
-                        target_con = int(data[10:14])
-                        # if one time mode: system_control_head + realdata
-                        data = data[14:]
-                        next_cons.pop(rname).close() if rname in next_cons else None
-                        next_cons[rname] = outq.pop(target_con)
-                    print rname, target_con, data
-                    if data:
-                        s_inet = next_cons.get(rname)
-                    if s_inet:
-                        print "put data back to client with inet socket: %s" % target_con
-                        s_inet.send(data)
-                        # if keep alive will difference
-                        try:
-                            inputs.remove(s_inet)
-                            s_inet.close()
-                        except:
-                            print 'error on remove s_inet!'
-                            continue
-                    else:
-                        print "not found the correct connection to inet with name: %s" % target_con
+            data = _.recv(1024)
+            if not data:
+                continue
+            fromer = _.getpeername()[0] if _.family == socket.AF_INET else 'sock'
+            print('received data with len %s from %s' % (len(data), fromer))
+            # when data from mproc send data to client with output
+            # devide for tcp and unix socket
+            if _.family == socket.AF_INET:
+                v = wdispatcher(data)
+                #os.write(s_sockets[v], '1bcdef')
+                fno = _.fileno()
+                s = s_sockets[v]
+                # presending message=> which conn has hold the connection with clients
+                s.sendall('<::0000::>{:0>4d}'.format(fno))
+                s.send(data)
+                # make the inet connectin for return data
+                outq[fno] = _
+                # the unix con s should wait for respon from mproc, so put into inputs
+                # pattern: cause we are under the syn mode, only one conn on a r_socket, so use index of unix socket for name of conn
+            elif _.family == socket.AF_UNIX:
+                # data from unix means comes from worker from r_sockets
+                # chcek the target con:
+                rname = r_sockets.index(_)
+                s_inet = None
+                if len(data) >= 14 and data[:10] == '<::1111::>':
+                    target_con = int(data[10:14])
+                    # if one time mode: system_control_head + realdata
+                    data = data[14:]
+                    next_cons.pop(rname).close() if rname in next_cons else None
+                    next_cons[rname] = outq.pop(target_con)
+                #print rname, target_con, data
+                if data:
+                    s_inet = next_cons.get(rname)
+                if s_inet:
+                    print "put data back to client with inet socket: %s" % target_con
+                    s_inet.send(data)
+                    # if keep alive will difference
+                    try:
+                        inputs.remove(s_inet)
+                    except:
+                        print 'error on remove s_inet!'
                         continue
                 else:
-                    #print "no data recv!"
-                    if _.family == socket.AF_UNIX:
-                        _.setblocking(0)
-                    else:
-                        inputs.remove(_)
-                        _.close()
+                    print "not found the correct connection to inet with name: %s" % target_con
+                    continue
+            else:
+                print "bad recv!"
+                inputs.remove(_)
+                _.close()
         if exceptional:
             print "error FDS!"
             print exceptional
