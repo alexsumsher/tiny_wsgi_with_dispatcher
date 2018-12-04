@@ -64,14 +64,14 @@ def make_inet_socket(ipaddr, port, presock=None):
 def is_port_clear(host, port):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        rlt = sock.connect_ex((host, port))
+        sock.connect((host, port))
         sock.close()
-    except:
+    except socket.error:
         # if host not found some... false
         print "connect error!"
-        return False
+        return True
     # if we can connect to port rlt==0 means port is used!
-    return False if rlt == 0 else True
+    return False
 
 
 # single server mode
@@ -239,23 +239,31 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
             clearup()
             return
         # handle: server_socket; worker_socket; client_socket
-        print 'lenth of coming sock: %s' % len(readable)
+        # print 'lenth of coming sock: %s' % len(readable)
         # 如果select是线性扫描，则如有client connnect必然在首位
         # https://blog.csdn.net/q8250356/article/details/81058396
         if readable and readable[0] is server:
+            print readable
             svr = readable.pop(0)
             # server always listen so accept with another socket
             conn, client_addr = server.accept()
             print("new connection from", client_addr)
             # for fast hanlding put conn to input and handle it next loop
-            conn.setblocking(0)
             # 直接处理？通常client发起connect的同时会立刻发送数据
             # 可能策略2：select只循环[server,]并将accept生成的conn列表，一直到到没有接入要求时再开始处理conn列表的recv操作？
-            readable.append(conn)
+            conn.setblocking(0)
+            inputs.append(conn)
             #inputs.append(conn)
         for _ in readable:
+            print _
             data = _.recv(1024)
             if not data:
+                print 'empty recv'
+                _.close()
+                try:
+                    inputs.remove(_)
+                except:
+                    pass
                 continue
             fromer = _.getpeername()[0] if _.family == socket.AF_INET else 'sock'
             print('received data with len %s from %s' % (len(data), fromer))
@@ -266,9 +274,10 @@ def main_proc(proc_num_limit=0, host='0.0.0.0', port=8080):
                 #os.write(s_sockets[v], '1bcdef')
                 fno = _.fileno()
                 s = s_sockets[v]
+                print s
                 # presending message=> which conn has hold the connection with clients
                 s.sendall('<::0000::>{:0>4d}'.format(fno))
-                s.send(data)
+                s.sendall(data)
                 # make the inet connectin for return data
                 outq[fno] = _
                 # the unix con s should wait for respon from mproc, so put into inputs

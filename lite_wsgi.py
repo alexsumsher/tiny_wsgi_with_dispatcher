@@ -112,12 +112,12 @@ class Twsgi(Thread):
 
     def run(self):
         print 'thread waiting...'
-        self.ev.wait(self.globalwait)
-        self.ev.clear()
         print 'thread: %s working...' % self.name
         #respiter = self.wsgi(self.env, self.sender)
         result = self.app(self.env, self.start_response)
         try:
+            self.ev.wait(self.globalwait)
+            self.ev.clear()
             self.sender.sendall('<::1111::>%s' % self.name)
             for data in result:
                 if data:    # don't send headers until body appears
